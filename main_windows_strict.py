@@ -56,9 +56,17 @@ logging.basicConfig(
 downloading = threading.Event()
 
 # Изображения для разных состояний значка
-ICON_DEFAULT = None
-ICON_ACTIVE = None
-ICON_DOWNLOADING = None
+
+def load_icon(name: str) -> Optional[Image.Image]:
+    """Load an icon image, returning ``None`` on failure."""
+    try:
+        return Image.open(resource_path(name))
+    except Exception:
+        return None
+
+ICON_DEFAULT = load_icon('ico.ico')
+ICON_ACTIVE = load_icon('act.ico')
+ICON_DOWNLOADING = load_icon('dw.ico')
 
 def flash_tray_icon(icon: pystray.Icon, image: Image.Image, duration: float = 0.3) -> None:
     """Temporarily change the tray icon."""
@@ -220,9 +228,9 @@ def download_all(icon: Optional[pystray.Icon] = None) -> None:
         return
 
     # —————— Смена иконки на dw.ico ——————
-    if icon is not None:
+    if icon is not None and ICON_DOWNLOADING:
         try:
-            icon.icon = Image.open(resource_path('dw.ico'))
+            icon.icon = ICON_DOWNLOADING
         except Exception:
             pass
 
@@ -253,9 +261,9 @@ def download_all(icon: Optional[pystray.Icon] = None) -> None:
         finally:
             downloading.clear()
             # —————— Возврат иконки ico.ico ——————
-            if icon is not None:
+            if icon is not None and ICON_DEFAULT:
                 try:
-                    icon.icon = Image.open(resource_path('ico.ico'))
+                    icon.icon = ICON_DEFAULT
                 except Exception:
                     pass
 
@@ -302,19 +310,10 @@ def main() -> None:
     add_hotkey = config.get('add_hotkey', DEFAULT_CONFIG['add_hotkey'])
     download_hotkey = config.get('download_hotkey', DEFAULT_CONFIG['download_hotkey'])
 
-    # Функция-обёртка для добавления ссылки + смена иконки act.ico
+    # Функция-обёртка для добавления ссылки с краткой сменой иконки
     def on_add(icon: pystray.Icon):
-        try:
-            icon.icon = Image.open(resource_path('act.ico'))
-        except Exception:
-            pass
-
+        flash_tray_icon(icon, ICON_ACTIVE)
         add_link_from_clipboard()
-
-        try:
-            icon.icon = Image.open(resource_path('ico.ico'))
-        except Exception:
-            pass
 
     # Меняем горячую клавишу
     def change_hotkey(icon, item):
@@ -385,9 +384,7 @@ def main() -> None:
     )
 
     # Иконка в трее
-    icon_path = resource_path('ico.ico')
-    image = Image.open(icon_path) if os.path.exists(icon_path) else None
-    tray_icon = pystray.Icon('YTDownloader', image, 'YT Downloader', menu)
+    tray_icon = pystray.Icon('YTDownloader', ICON_DEFAULT, 'YT Downloader', menu)
 
     # Привязка горячих клавиш
     keyboard.add_hotkey(add_hotkey, lambda: on_add(tray_icon))
