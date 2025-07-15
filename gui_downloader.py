@@ -1,3 +1,4 @@
+
 """Minimalistic downloader using ``yt_dlp`` with optional GUI.
 
 The script provides two modes of operation:
@@ -13,12 +14,15 @@ It stores settings in ``config.json`` next to the script and logs events to
 """
 
 from typing import List, Dict, Callable
+
 import os
 import sys
 import json
 import threading
 import logging
 import time
+from typing import List, Dict
+
 
 import yt_dlp
 import pyperclip
@@ -46,11 +50,13 @@ logging.basicConfig(
 
 
 def load_config() -> Dict[str, str]:
+
     """Return configuration dictionary merging defaults with ``config.json``.
 
     If the file is missing or broken the default configuration is returned and
     the error is logged.
     """
+
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -63,7 +69,9 @@ def load_config() -> Dict[str, str]:
 
 
 def save_config(cfg: Dict[str, str]) -> None:
+
     """Write configuration dictionary to ``config.json``."""
+
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -72,6 +80,7 @@ def save_config(cfg: Dict[str, str]) -> None:
 
 
 def ensure_download_dir(path: str) -> None:
+
     """Create download directory if it does not exist."""
     os.makedirs(path, exist_ok=True)
 
@@ -82,6 +91,7 @@ def download_url(url: str, folder: str, progress_callback: Callable | None = Non
     ``progress_callback`` is passed directly to the yt_dlp progress hook.
     Any exception from ``yt_dlp`` is logged and re-raised.
     """
+
     ydl_opts = {
         'format': 'best',
         'outtmpl': os.path.join(folder, '%(title)s.%(ext)s'),
@@ -95,6 +105,7 @@ def download_url(url: str, folder: str, progress_callback: Callable | None = Non
     except Exception as e:
         logging.error('Download error: %s', e)
         raise
+
 
 
 def run_headless() -> None:
@@ -167,6 +178,7 @@ def run_headless() -> None:
 class App(tk.Tk):
     """Graphical interface for managing the download queue."""
 
+
     def __init__(self) -> None:
         super().__init__()
         self.title('YT Downloader')
@@ -180,6 +192,7 @@ class App(tk.Tk):
         self.register_hotkeys()
 
     def create_widgets(self) -> None:
+
         """Build all widgets for the interface."""
         frm = ttk.Frame(self, padding=10)
         frm.grid(row=0, column=0, sticky='nsew')
@@ -228,11 +241,13 @@ class App(tk.Tk):
 
     def choose_path(self) -> None:
         """Show folder selection dialog and update path variable."""
+
         new_path = filedialog.askdirectory(initialdir=self.path_var.get())
         if new_path:
             self.path_var.set(new_path)
 
     def apply_settings(self) -> None:
+
         """Save settings and re-register hotkeys."""
         try:
             keyboard.unhook_all_hotkeys()
@@ -248,7 +263,9 @@ class App(tk.Tk):
         messagebox.showinfo('Hotkeys', 'Settings applied')
 
     def register_hotkeys(self) -> None:
+
         """Register global hotkeys for adding links and starting downloads."""
+
         try:
             keyboard.add_hotkey(self.cfg['add_hotkey'], self.add_from_clipboard)
             keyboard.add_hotkey(self.cfg['download_hotkey'], self.start_downloads)
@@ -256,7 +273,9 @@ class App(tk.Tk):
             logging.error('Failed to register hotkeys: %s', e)
 
     def add_from_clipboard(self) -> None:
+
         """Grab URL from clipboard and add it to the queue."""
+
         try:
             pyperclip.copy('')
             keyboard.press_and_release('ctrl+c')
@@ -265,7 +284,9 @@ class App(tk.Tk):
             logging.error('Clipboard error: %s', e)
 
     def _read_clipboard(self) -> None:
+
         """Read clipboard contents and append to the listbox."""
+
         url = pyperclip.paste().strip()
         if url:
             self.links.append(url)
@@ -275,7 +296,9 @@ class App(tk.Tk):
             logging.info('Clipboard empty')
 
     def remove_selected(self) -> None:
+
         """Remove selected items from the queue."""
+
         sel = list(self.listbox.curselection())
         for i in reversed(sel):
             self.listbox.delete(i)
@@ -283,17 +306,22 @@ class App(tk.Tk):
 
     def clear_list(self) -> None:
         """Remove all URLs from the queue."""
+
         self.listbox.delete(0, tk.END)
         self.links.clear()
 
     def start_downloads(self) -> None:
+
         """Start background thread to download all queued URLs."""
+
         if not self.links:
             return
         threading.Thread(target=self._download_worker, daemon=True).start()
 
     def _download_worker(self) -> None:
+
         """Worker thread that iterates over the queue and downloads each URL."""
+
         folder = self.path_var.get()
         for idx, url in enumerate(list(self.links)):
             self.progress['value'] = 0
@@ -307,6 +335,7 @@ class App(tk.Tk):
         messagebox.showinfo('Done', 'All downloads finished')
 
     def _progress_hook(self, d):
+
         """Update progress bar using ``yt_dlp`` progress hooks."""
         if d['status'] == 'downloading':
             total = d.get('total_bytes') or d.get('total_bytes_estimate') or 1
@@ -328,3 +357,4 @@ if __name__ == '__main__':
             keyboard.unhook_all_hotkeys()
         except Exception:
             pass
+
