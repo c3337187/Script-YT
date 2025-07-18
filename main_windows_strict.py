@@ -208,55 +208,50 @@ def download_wb_images(url: str, folder: str) -> None:
             return
         product_id = m.group(1)
 
-        api_url = (
-            "https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&nm="
-            + product_id
-        )
+        vol = int(product_id) // 100000
+        part = int(product_id) // 1000
+
         headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(api_url, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        products = data.get("data", {}).get("products") or []
-        if not products:
+
+        card_data = None
+        host_used = None
+        for host in range(100):
+            card_url = (
+                f"https://basket-{host:02d}.wbbasket.ru/vol{vol}/part{part}/"
+                f"{product_id}/info/ru/card.json"
+            )
+            try:
+                resp = requests.get(card_url, headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    card_data = resp.json()
+                    host_used = host
+                    break
+            except Exception:
+                continue
+
+        if not card_data:
             print("Не удалось получить данные о товаре WB.")
             return
-        product = products[0]
-        name = product.get("name", f"wb_{product_id}")
+
+        name = card_data.get("imt_name", f"wb_{product_id}")
         safe_name = "".join(c for c in name if c not in "\\/:*?\"<>|")
         product_folder = os.path.join(folder, safe_name)
         os.makedirs(product_folder, exist_ok=True)
 
-        images = []
-        media = product.get("media") or {}
-        if "photo" in media:
-            images = media.get("photo") or []
-        if not images:
-            images = product.get("photos") or []
-
-        if not images:
-            print("Не удалось найти изображения для товара WB.")
+        count = card_data.get("media", {}).get("photo_count") or 0
+        if not count:
+            print("Не удалось определить количество изображений WB.")
             return
 
-        for img in images:
-            if isinstance(img, dict):
-                img_name = img.get("big") or img.get("full") or img.get("name")
-            else:
-                img_name = img
-            if not img_name:
-                continue
-            if not img_name.endswith(".jpg"):
-                img_name = str(img_name) + ".jpg"
+        host_part = f"https://basket-{host_used:02d}.wbbasket.ru"
 
-            vol = int(product_id) // 100000
-            part = int(product_id) // 1000
+        for i in range(1, count + 1):
             img_url = (
-                f"https://basket-{vol % 10}.wb.ru/vol{vol}/part{part}/"
-                f"{product_id}/images/big/{img_name}"
+                f"{host_part}/vol{vol}/part{part}/{product_id}/images/big/{i}.webp"
             )
-
             try:
-                img_data = requests.get(img_url, headers=headers).content
-                out_path = os.path.join(product_folder, os.path.basename(img_name))
+                img_data = requests.get(img_url, headers=headers, timeout=10).content
+                out_path = os.path.join(product_folder, f"{i}.webp")
                 with open(out_path, "wb") as f:
                     f.write(img_data)
                 print(f"Скачано: {out_path}")
