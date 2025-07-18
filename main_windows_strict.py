@@ -6,6 +6,7 @@ import json
 import logging
 from urllib.parse import urlparse
 from typing import Optional
+import re
 
 import yt_dlp
 import requests
@@ -45,6 +46,7 @@ DOWNLOADS_FOLDER = os.path.join(BASE_FOLDER, 'Downloads')
 VIDEOS_FOLDER = os.path.join(DOWNLOADS_FOLDER, 'Videos')
 PLAYLIST_FOLDER = os.path.join(VIDEOS_FOLDER, 'Playlist Videos')
 PICTURES_FOLDER = os.path.join(DOWNLOADS_FOLDER, 'Pictures')
+WB_FOLDER = os.path.join(PICTURES_FOLDER, 'Wildberries')
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -98,6 +100,7 @@ def ensure_directories() -> None:
     os.makedirs(VIDEOS_FOLDER, exist_ok=True)
     os.makedirs(PLAYLIST_FOLDER, exist_ok=True)
     os.makedirs(PICTURES_FOLDER, exist_ok=True)
+    os.makedirs(WB_FOLDER, exist_ok=True)
 
 def load_config() -> dict:
     if os.path.exists(CONFIG_FILE):
@@ -196,6 +199,69 @@ def download_pinterest_image(url, folder):
         print(f"Ошибка при скачивании изображения с Pinterest: {e}")
 
 
+def download_wb_images(url: str, folder: str) -> None:
+    """Скачивает все изображения товара Wildberries."""
+    try:
+        m = re.search(r"/catalog/(\d+)/", url)
+        if not m:
+            print("Не удалось извлечь ID товара из ссылки WB.")
+            return
+        product_id = m.group(1)
+
+        vol = int(product_id) // 100000
+        part = int(product_id) // 1000
+
+        headers = {"User-Agent": "Mozilla/5.0"}
+
+        card_data = None
+        host_used = None
+        for host in range(100):
+            card_url = (
+                f"https://basket-{host:02d}.wbbasket.ru/vol{vol}/part{part}/"
+                f"{product_id}/info/ru/card.json"
+            )
+            try:
+                resp = requests.get(card_url, headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    card_data = resp.json()
+                    host_used = host
+                    break
+            except Exception:
+                continue
+
+        if not card_data:
+            print("Не удалось получить данные о товаре WB.")
+            return
+
+        name = card_data.get("imt_name", f"wb_{product_id}")
+        safe_name = "".join(c for c in name if c not in "\\/:*?\"<>|")
+        product_folder = os.path.join(folder, safe_name)
+        os.makedirs(product_folder, exist_ok=True)
+
+        count = card_data.get("media", {}).get("photo_count") or 0
+        if not count:
+            print("Не удалось определить количество изображений WB.")
+            return
+
+        host_part = f"https://basket-{host_used:02d}.wbbasket.ru"
+
+        for i in range(1, count + 1):
+            img_url = (
+                f"{host_part}/vol{vol}/part{part}/{product_id}/images/big/{i}.webp"
+            )
+            try:
+                img_data = requests.get(img_url, headers=headers, timeout=10).content
+                out_path = os.path.join(product_folder, f"{i}.webp")
+                with open(out_path, "wb") as f:
+                    f.write(img_data)
+                print(f"Скачано: {out_path}")
+            except Exception as e:
+                logging.error("Не удалось скачать %s: %s", img_url, e)
+    except Exception as e:
+        logging.error("Ошибка при скачивании изображений WB: %s", e)
+        print(f"Ошибка при скачивании изображений WB: {e}")
+
+
 def handle_url(url: str) -> None:
     """Определяет тип ссылки и запускает скачивание."""
     hostname = urlparse(url).hostname or ""
@@ -215,6 +281,11 @@ def handle_url(url: str) -> None:
         logging.info('Скачиваем изображение Pinterest: %s', url)
         print("Это Pinterest ссылка. Пытаемся скачать...")
         download_pinterest_image(url, PICTURES_FOLDER)
+
+    elif "wildberries.ru" in hostname:
+        logging.info('Скачиваем товар Wildberries: %s', url)
+        print("Это ссылка Wildberries. Пытаемся скачать изображения...")
+        download_wb_images(url, WB_FOLDER)
 
     else:
         logging.warning('Неизвестная ссылка: %s', url)
