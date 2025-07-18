@@ -30,6 +30,15 @@ try:
 except Exception:  # When display server is missing
     pystray = None  # type: ignore
     Image = None  # type: ignore
+if os.name == 'nt':
+    try:
+        import win32con
+        import win32api
+        import win32gui
+    except Exception:
+        win32con = win32api = win32gui = None  # type: ignore
+else:
+    win32con = win32api = win32gui = None  # type: ignore
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -43,9 +52,91 @@ ICON_DEFAULT = os.path.join(BASE_FOLDER, 'ico.ico')
 ICON_ACTIVE = os.path.join(BASE_FOLDER, 'act.ico')
 ICON_DOWNLOAD = os.path.join(BASE_FOLDER, 'dw.ico')
 
-BG_COLOR = '#000000'
-FG_COLOR = '#ffffff'
-TEXT_COLOR = '#cccccc'
+BG_COLOR = '#2b2b2b'
+FG_COLOR = '#f0f0f0'
+TEXT_COLOR = '#dddddd'
+PROGRESS_EMPTY = '#555555'
+
+
+class HotkeyManager:
+    """Cross-platform hotkey registration with fallback to ``keyboard``."""
+
+    def __init__(self) -> None:
+        self.ids: dict[int, Callable] = {}
+        self._counter = 1
+        self._loop_thread: threading.Thread | None = None
+
+    def _parse_win(self, combo: str) -> tuple[int, int] | None:
+        if not win32con:
+            return None
+        mods = 0
+        key = None
+        for part in combo.lower().split('+'):
+            if part == 'ctrl':
+                mods |= win32con.MOD_CONTROL
+            elif part == 'alt':
+                mods |= win32con.MOD_ALT
+            elif part == 'shift':
+                mods |= win32con.MOD_SHIFT
+            elif part == 'win':
+                mods |= win32con.MOD_WIN
+            else:
+                key = part
+        if key is None:
+            return None
+        vk = getattr(win32con, f'VK_{key.upper()}', None)
+        if vk is None:
+            if len(key) == 1:
+                vk = ord(key.upper())
+            else:
+                return None
+        return mods, vk
+
+    def _run_loop(self) -> None:
+        if not win32gui:
+            return
+        while True:
+            msg = win32gui.GetMessage(None, 0, 0)
+            if not msg:
+                break
+            if msg[1][1] == win32con.WM_HOTKEY:
+                hot_id = msg[1][2]
+                cb = self.ids.get(hot_id)
+                if cb:
+                    cb()
+            win32gui.TranslateMessage(msg[1])
+            win32gui.DispatchMessage(msg[1])
+
+    def register(self, combo: str, callback: Callable) -> None:
+        if os.name == 'nt' and win32api:
+            parsed = self._parse_win(combo)
+            if parsed:
+                mods, vk = parsed
+                hot_id = self._counter
+                self._counter += 1
+                try:
+                    if win32api.RegisterHotKey(None, hot_id, mods, vk):
+                        self.ids[hot_id] = callback
+                        if not self._loop_thread:
+                            self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+                            self._loop_thread.start()
+                        return
+                except Exception as e:
+                    logging.error('Win32 hotkey failed: %s', e)
+        keyboard.add_hotkey(combo, callback, suppress=True, trigger_on_release=True)
+
+    def unregister_all(self) -> None:
+        if os.name == 'nt' and win32api:
+            for hot_id in list(self.ids):
+                try:
+                    win32api.UnregisterHotKey(None, hot_id)
+                except Exception:
+                    pass
+            self.ids.clear()
+        keyboard.unhook_all_hotkeys()
+
+
+hotkey_manager = HotkeyManager()
 
 
 def resource_path(name: str) -> str:
@@ -169,8 +260,8 @@ def run_headless() -> None:
                 print(f'Failed to download {url}')
 
     try:
-        keyboard.add_hotkey(cfg['add_hotkey'], add_from_clipboard)
-        keyboard.add_hotkey(cfg['download_hotkey'], start_downloads)
+        hotkey_manager.register(cfg['add_hotkey'], add_from_clipboard)
+        hotkey_manager.register(cfg['download_hotkey'], start_downloads)
     except Exception as e:
         logging.error('Failed to register hotkeys: %s', e)
 
@@ -182,7 +273,7 @@ def run_headless() -> None:
         print('\nExiting...')
     finally:
         try:
-            keyboard.unhook_all_hotkeys()
+            hotkey_manager.unregister_all()
         except Exception:
             pass
 
@@ -294,7 +385,7 @@ class App(tk.Tk):
 
     def safe_exit(self) -> None:
         try:
-            keyboard.unhook_all_hotkeys()
+            hotkey_manager.unregister_all()
         except Exception:
             pass
         self.destroy()
@@ -327,38 +418,43 @@ class App(tk.Tk):
         reserve_btn = ttk.Button(frm, text='Применить', command=self.apply_settings)
         reserve_btn.grid(row=1, column=2, rowspan=2, padx=5)
 
+        # Manual link entry
+        ttk.Label(frm, text='Ссылка:').grid(row=3, column=0, sticky='w')
+        self.link_var = tk.StringVar()
+        ttk.Entry(frm, textvariable=self.link_var, width=40).grid(row=3, column=1, sticky='we')
+        ttk.Button(frm, text='Добавить', command=self.add_from_entry).grid(row=3, column=2, padx=5)
+
         # Queue list
         self.listbox = tk.Listbox(frm, width=60, height=10, bg=BG_COLOR, fg=TEXT_COLOR, highlightbackground=FG_COLOR, selectbackground=FG_COLOR, selectforeground=BG_COLOR)
-        self.listbox.grid(row=3, column=0, columnspan=3, pady=5)
-
+        self.listbox.grid(row=4, column=0, columnspan=3, pady=5)
         add_btn = ttk.Button(frm, text='Добавить из буфера', command=self.add_from_clipboard)
-        add_btn.grid(row=4, column=0, sticky='we', pady=2)
+        add_btn.grid(row=5, column=0, sticky='we', pady=2)
 
         remove_btn = ttk.Button(frm, text='Удалить выбранное', command=self.remove_selected)
-        remove_btn.grid(row=4, column=1, sticky='we', pady=2)
+        remove_btn.grid(row=5, column=1, sticky='we', pady=2)
 
         clear_btn = ttk.Button(frm, text='Очистить список', command=self.clear_list)
-        clear_btn.grid(row=4, column=2, sticky='we', pady=2)
+        clear_btn.grid(row=5, column=2, sticky='we', pady=2)
 
         start_btn = ttk.Button(frm, text='Скачать', command=self.start_downloads)
-        start_btn.grid(row=5, column=0, columnspan=3, sticky='we', pady=(10,2))
+        start_btn.grid(row=6, column=0, columnspan=3, sticky='we', pady=(10,2))
 
         self.progress_canvas = tk.Canvas(frm, width=120, height=30, bg=BG_COLOR, highlightthickness=0)
-        self.progress_canvas.grid(row=6, column=0, columnspan=3, pady=2)
+        self.progress_canvas.grid(row=7, column=0, columnspan=3, pady=2)
         self.progress_dots = []
         for i in range(4):
             x = 15 + i * 30
             self.progress_dots.append(
                 self.progress_canvas.create_oval(
                     x-10, 10, x+10, 30,
-                    outline=FG_COLOR, fill=BG_COLOR
+                    outline=FG_COLOR, fill=PROGRESS_EMPTY
                 )
             )
 
     def _update_progress(self, percent: float) -> None:
         filled = int(percent // 25)
         for i, dot in enumerate(self.progress_dots):
-            color = FG_COLOR if i < filled else BG_COLOR
+            color = FG_COLOR if i < filled else PROGRESS_EMPTY
             self.progress_canvas.itemconfig(dot, fill=color)
         self.update_idletasks()
 
@@ -371,7 +467,7 @@ class App(tk.Tk):
     def apply_settings(self) -> None:
         """Save settings and re-register hotkeys."""
         try:
-            keyboard.unhook_all_hotkeys()
+            hotkey_manager.unregister_all()
         except Exception:
             pass
 
@@ -386,8 +482,8 @@ class App(tk.Tk):
     def register_hotkeys(self) -> None:
         """Register global hotkeys for adding links and starting downloads."""
         try:
-            keyboard.add_hotkey(self.cfg['add_hotkey'], self.add_from_clipboard, suppress=True)
-            keyboard.add_hotkey(self.cfg['download_hotkey'], self.start_downloads, suppress=True)
+            hotkey_manager.register(self.cfg['add_hotkey'], self.add_from_clipboard)
+            hotkey_manager.register(self.cfg['download_hotkey'], self.start_downloads)
         except Exception as e:
             logging.error('Failed to register hotkeys: %s', e)
 
@@ -400,6 +496,16 @@ class App(tk.Tk):
             self.tray.flash('act.ico')
         except Exception as e:
             logging.error('Clipboard error: %s', e)
+
+    def add_from_entry(self) -> None:
+        """Add URL from entry field to the queue."""
+        url = self.link_var.get().strip()
+        if not url:
+            return
+        self.links.append(url)
+        self.listbox.insert(tk.END, url)
+        self.link_var.set('')
+        logging.info('Added URL manually: %s', url)
 
     def _read_clipboard(self) -> None:
         """Read clipboard contents and append to the listbox."""
@@ -463,6 +569,6 @@ if __name__ == '__main__':
             app.mainloop()
     finally:
         try:
-            keyboard.unhook_all_hotkeys()
+            hotkey_manager.unregister_all()
         except Exception:
             pass
