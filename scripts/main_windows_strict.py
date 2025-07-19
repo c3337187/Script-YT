@@ -130,6 +130,10 @@ CONFIG_FILE = os.path.join(SYSTEM_DIR, 'config.ini')
 LOG_FILE = os.path.join(SYSTEM_DIR, 'script.log')
 INFO_FILE = os.path.join(SYSTEM_DIR, 'info.txt')
 
+# Ensure the system directory exists before configuring logging
+os.makedirs(SYSTEM_DIR, exist_ok=True)
+
+
 # Эти переменные инициализируются после загрузки конфигурации
 DOWNLOADS_FOLDER = os.path.join(ROOT_DIR, 'Downloads')
 VIDEOS_FOLDER = os.path.join(DOWNLOADS_FOLDER, 'Videos')
