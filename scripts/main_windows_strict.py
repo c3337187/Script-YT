@@ -159,9 +159,9 @@ def load_icon(name: str) -> Optional[Image.Image]:
     except Exception:
         return None
 
-ICON_DEFAULT = load_icon(os.path.join('ico', 'ico.ico'))
-ICON_ACTIVE = load_icon(os.path.join('ico', 'act.ico'))
-ICON_DOWNLOADING = load_icon(os.path.join('ico', 'dw.ico'))
+ICON_DEFAULT = load_icon(os.path.join('ico', 'eye-Normal-State.ico'))
+ICON_ACTIVE = load_icon(os.path.join('ico', 'eye-Hot-key.ico'))
+ICON_DOWNLOADING = load_icon(os.path.join('ico', 'download-solid(Normal-State).ico'))
 
 def flash_tray_icon(icon: pystray.Icon, image: Image.Image, duration: float = 0.3) -> None:
     """Temporarily change the tray icon."""
@@ -397,7 +397,7 @@ def download_all(icon: Optional[pystray.Icon] = None) -> None:
         print("Скачивание уже выполняется.")
         return
 
-    # —————— Смена иконки на dw.ico ——————
+    # —————— Смена иконки на download-solid(Normal-State).ico ——————
     if icon is not None and ICON_DOWNLOADING:
         try:
             icon.icon = ICON_DOWNLOADING
@@ -430,7 +430,7 @@ def download_all(icon: Optional[pystray.Icon] = None) -> None:
 
         finally:
             downloading.clear()
-            # —————— Возврат иконки ico.ico ——————
+            # —————— Возврат иконки eye-Normal-State.ico ——————
             if icon is not None and ICON_DEFAULT:
                 try:
                     icon.icon = ICON_DEFAULT
@@ -545,12 +545,12 @@ def main() -> None:
 
     # Составляем меню
     menu = pystray.Menu(
-        pystray.MenuItem('Скачать', on_download),
-        pystray.MenuItem('Список загрузок', open_list),
-        pystray.MenuItem('Открыть папку для загрузки', open_folder),
-        pystray.MenuItem('Горячие клавиши', change_hotkey),
-        pystray.MenuItem('Инфо', show_info),
-        pystray.MenuItem('Выход', on_exit),
+        pystray.MenuItem('СКАЧАТЬ', on_download),
+        pystray.MenuItem('СПИСОК ЗАГРУЗОК', open_list),
+        pystray.MenuItem('ПАПКА ЗАГРУЗКИ', open_folder),
+        pystray.MenuItem('HOTKEY', change_hotkey),
+        pystray.MenuItem('INFO', show_info),
+        pystray.MenuItem('ВЫХОД', on_exit),
     )
 
     # Иконка в трее

@@ -74,15 +74,30 @@ pip install pyinstaller
 python scripts/check_update/build_exe.py
 ```
 
-Скрипт проверит зависимости, скомпилирует исходники и соберёт два exe (gui_downloader.py и main_windows_strict.py)
+Скрипт проверит зависимости, скомпилирует исходники и соберёт exe для `main_windows_strict.py`,
 затем вызовет PyInstaller. При
 желании можно выполнить команду напрямую:
 
 ```bash
-pyinstaller --onefile --windowed --icon=ico/ico.ico \
+pyinstaller --onefile --windowed --icon=ico/eye-Normal-State.ico \
   --add-data="ico;ico" --add-data="system;system" \
-  scripts/gui_downloader.py
+  scripts/main_windows_strict.py
 ```
+
+### Сборка C++ версии
+
+При необходимости можно собрать минимальную реализацию на C++. Потребуется
+компилятор MinGW-w64 или MSVC, так как исходник использует `windows.h`.
+
+Пример команды для MinGW-w64:
+
+```bash
+g++ cpp/main_windows_strict.cpp -std=c++17 -O2 -static -municode -mwindows \
+    -o main_windows_strict.exe
+```
+
+Запускайте её из корня репозитория, чтобы программа могла найти папку `ico` и
+директорию `system` рядом с exe.
 
 ## Структура кода
 
