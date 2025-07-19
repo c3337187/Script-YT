@@ -57,7 +57,7 @@ def build_executable(script: str) -> bool:
         '--noconfirm',
         '--onefile',
         '--windowed',
-        f'--icon=ico/ico.ico',
+        f'--icon=ico/eye-Normal-State.ico',
         f'--add-data=ico{sep}ico',
         f'--add-data=system{sep}system',
         script,
@@ -69,7 +69,7 @@ def main() -> None:
     if not check_packages():
         input('Dependency check failed. Press Enter to exit...')
         return
-    scripts = ['scripts/gui_downloader.py', 'scripts/main_windows_strict.py']
+    scripts = ['scripts/main_windows_strict.py']
     if not compile_sources(scripts):
         input('Compilation failed. Press Enter to exit...')
         return
