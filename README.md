@@ -84,6 +84,21 @@ pyinstaller --onefile --windowed --icon=ico/eye-Normal-State.ico \
   scripts/main_windows_strict.py
 ```
 
+### Сборка C++ версии
+
+При необходимости можно собрать минимальную реализацию на C++. Потребуется
+компилятор MinGW-w64 или MSVC, так как исходник использует `windows.h`.
+
+Пример команды для MinGW-w64:
+
+```bash
+g++ cpp/main_windows_strict.cpp -std=c++17 -O2 -static -municode -mwindows \
+    -o main_windows_strict.exe
+```
+
+Запускайте её из корня репозитория, чтобы программа могла найти папку `ico` и
+директорию `system` рядом с exe.
+
 ## Структура кода
 
 -- **`load_config()`** — считывает настройки из `config.ini`,
