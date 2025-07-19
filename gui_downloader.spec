@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['gui_downloader.py'],
+    ['scripts/gui_downloader.py'],
     pathex=[],
     binaries=[],
-    datas=[('ico.ico', '.'), ('act.ico', '.'), ('dw.ico', '.'), ('config.ini', '.')],
+    datas=[('ico', 'ico'), ('assets', 'assets'), ('system', 'system')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['ico.ico'],
+    icon=['ico/ico.ico'],
 )
