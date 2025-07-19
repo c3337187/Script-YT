@@ -12,6 +12,7 @@ REQUIRED = {
     'keyboard': 'keyboard',
     'PIL': 'pillow',
     'win32api': 'pywin32',
+    'PyInstaller': 'pyinstaller',
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
