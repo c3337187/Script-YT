@@ -15,10 +15,94 @@ import keyboard
 import pystray
 import pyperclip
 import threading
-
+try:
+    import win32con
+    import win32api
+    import win32gui
+except Exception:
+    win32con = win32api = win32gui = None  # type: ignore
 from PIL import Image
 import subprocess
 
+
+class HotkeyManager:
+    """Cross-platform hotkey registration using pywin32 when possible."""
+
+    def __init__(self) -> None:
+        self.ids: dict[int, callable] = {}
+        self._counter = 1
+        self._loop_thread: threading.Thread | None = None
+
+    def _parse_win(self, combo: str) -> tuple[int, int] | None:
+        if not win32con:
+            return None
+        mods = 0
+        key = None
+        for part in combo.lower().split('+'):
+            if part == 'ctrl':
+                mods |= win32con.MOD_CONTROL
+            elif part == 'alt':
+                mods |= win32con.MOD_ALT
+            elif part == 'shift':
+                mods |= win32con.MOD_SHIFT
+            elif part == 'win':
+                mods |= win32con.MOD_WIN
+            else:
+                key = part
+        if key is None:
+            return None
+        vk = getattr(win32con, f'VK_{key.upper()}', None)
+        if vk is None:
+            if len(key) == 1:
+                vk = ord(key.upper())
+            else:
+                return None
+        return mods, vk
+
+    def _run_loop(self) -> None:
+        if not win32gui:
+            return
+        while True:
+            msg = win32gui.GetMessage(None, 0, 0)
+            if not msg:
+                break
+            if msg[1][1] == win32con.WM_HOTKEY:
+                cb = self.ids.get(msg[1][2])
+                if cb:
+                    cb()
+            win32gui.TranslateMessage(msg[1])
+            win32gui.DispatchMessage(msg[1])
+
+    def register(self, combo: str, callback) -> None:
+        if os.name == 'nt' and win32api:
+            parsed = self._parse_win(combo)
+            if parsed:
+                mods, vk = parsed
+                hot_id = self._counter
+                self._counter += 1
+                try:
+                    if win32api.RegisterHotKey(None, hot_id, mods, vk):
+                        self.ids[hot_id] = callback
+                        if not self._loop_thread:
+                            self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+                            self._loop_thread.start()
+                        return
+                except Exception as e:
+                    logging.error('Win32 hotkey failed: %s', e)
+        keyboard.add_hotkey(combo, callback, suppress=True, trigger_on_release=True)
+
+    def unregister_all(self) -> None:
+        if os.name == 'nt' and win32api:
+            for hot_id in list(self.ids):
+                try:
+                    win32api.UnregisterHotKey(None, hot_id)
+                except Exception:
+                    pass
+            self.ids.clear()
+        hotkey_manager.unregister_all()
+
+
+hotkey_manager = HotkeyManager()
 
 def get_base_folder() -> str:
     """Returns the folder where persistent files should be stored."""
@@ -389,7 +473,7 @@ def main() -> None:
     # Меняем горячую клавишу
     def change_hotkey(icon, item):
         icon.notify('Настройка', 'Нажмите новое сочетание и Enter')
-        keyboard.unhook_all_hotkeys()
+        hotkey_manager.unregister_all()
         try:
             new_key = keyboard.read_hotkey()
             if new_key:
@@ -400,8 +484,8 @@ def main() -> None:
             logging.error('Ошибка смены горячей клавиши: %s', e)
         finally:
             # Восстанавливаем привязки
-            keyboard.add_hotkey(config['add_hotkey'], lambda: on_add(icon))
-            keyboard.add_hotkey(config['download_hotkey'], lambda: download_all(icon))
+            hotkey_manager.register(config['add_hotkey'], lambda: on_add(icon))
+            hotkey_manager.register(config['download_hotkey'], lambda: download_all(icon))
 
     # Меню «Скачать»
     def on_download(icon, item):
@@ -458,12 +542,12 @@ def main() -> None:
     tray_icon = pystray.Icon('YTDownloader', ICON_DEFAULT, 'YT Downloader', menu)
 
     # Привязка горячих клавиш
-    keyboard.add_hotkey(add_hotkey, lambda: on_add(tray_icon))
-    keyboard.add_hotkey(download_hotkey, lambda: download_all(tray_icon))
+    hotkey_manager.register(add_hotkey, lambda: on_add(tray_icon))
+    hotkey_manager.register(download_hotkey, lambda: download_all(tray_icon))
 
     print(f"Значок размещён в трее. Горячие клавиши {add_hotkey} и {download_hotkey} активны.")
     tray_icon.run()
-    keyboard.unhook_all_hotkeys()
+    hotkey_manager.unregister_all()
     print('Скрипт завершён.')
 
 if __name__ == '__main__':
