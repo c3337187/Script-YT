@@ -56,6 +56,9 @@ ICO_DIR = os.path.join(ROOT_DIR, 'ico')
 CONFIG_FILE = os.path.join(SYSTEM_DIR, 'config.ini')
 LOG_FILE = os.path.join(SYSTEM_DIR, 'script.log')
 
+# Ensure the system directory exists for logs and config
+os.makedirs(SYSTEM_DIR, exist_ok=True)
+
 ICON_DEFAULT = os.path.join(ICO_DIR, 'ico.ico')
 ICON_ACTIVE = os.path.join(ICO_DIR, 'act.ico')
 ICON_DOWNLOAD = os.path.join(ICO_DIR, 'dw.ico')
