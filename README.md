@@ -74,14 +74,14 @@ pip install pyinstaller
 python scripts/check_update/build_exe.py
 ```
 
-Скрипт проверит зависимости, скомпилирует исходники и соберёт два exe (gui_downloader.py и main_windows_strict.py)
+Скрипт проверит зависимости, скомпилирует исходники и соберёт exe для `main_windows_strict.py`,
 затем вызовет PyInstaller. При
 желании можно выполнить команду напрямую:
 
 ```bash
-pyinstaller --onefile --windowed --icon=ico/ico.ico \
+pyinstaller --onefile --windowed --icon=ico/eye-Normal-State.ico \
   --add-data="ico;ico" --add-data="system;system" \
-  scripts/gui_downloader.py
+  scripts/main_windows_strict.py
 ```
 
 ## Структура кода
