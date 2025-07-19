@@ -5,7 +5,7 @@ a = Analysis(
     ['gui_downloader.py'],
     pathex=[],
     binaries=[],
-    datas=[('ico.ico', '.'), ('act.ico', '.'), ('dw.ico', '.'), ('config.json', '.')],
+    datas=[('ico.ico', '.'), ('act.ico', '.'), ('dw.ico', '.'), ('config.ini', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

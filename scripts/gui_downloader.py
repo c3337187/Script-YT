@@ -8,14 +8,14 @@ The script provides two modes of operation:
   purely in the console which is useful for environments without a display
   server. Progress information is printed to stdout.
 
-It stores settings in ``config.json`` next to the script and logs events to
-``script.log``.
+Settings are stored in ``config.ini`` inside the ``system`` folder and events
+are logged to ``script.log``.
 """
 
 from typing import List, Dict, Callable
 import os
 import sys
-import json
+import configparser
 import threading
 import logging
 import time
@@ -44,13 +44,24 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 
-BASE_FOLDER = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_FOLDER, 'config.json')
-LOG_FILE = os.path.join(BASE_FOLDER, 'script.log')
+def get_root_dir() -> str:
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    folder = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(folder) if os.path.basename(folder) == 'scripts' else folder
 
-ICON_DEFAULT = os.path.join(BASE_FOLDER, 'ico.ico')
-ICON_ACTIVE = os.path.join(BASE_FOLDER, 'act.ico')
-ICON_DOWNLOAD = os.path.join(BASE_FOLDER, 'dw.ico')
+ROOT_DIR = get_root_dir()
+SYSTEM_DIR = os.path.join(ROOT_DIR, 'system')
+ICO_DIR = os.path.join(ROOT_DIR, 'ico')
+CONFIG_FILE = os.path.join(SYSTEM_DIR, 'config.ini')
+LOG_FILE = os.path.join(SYSTEM_DIR, 'script.log')
+
+# Ensure the system directory exists for logs and config
+os.makedirs(SYSTEM_DIR, exist_ok=True)
+
+ICON_DEFAULT = os.path.join(ICO_DIR, 'ico.ico')
+ICON_ACTIVE = os.path.join(ICO_DIR, 'act.ico')
+ICON_DOWNLOAD = os.path.join(ICO_DIR, 'dw.ico')
 
 BG_COLOR = '#2b2b2b'
 FG_COLOR = '#f0f0f0'
@@ -139,14 +150,16 @@ class HotkeyManager:
 hotkey_manager = HotkeyManager()
 
 
-def resource_path(name: str) -> str:
+def resource_path(*parts: str) -> str:
     """Resolve resource path for bundled executables."""
     if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, name)  # type: ignore[attr-defined]
-    return os.path.join(BASE_FOLDER, name)
+        base = sys._MEIPASS  # type: ignore[attr-defined]
+    else:
+        base = ROOT_DIR
+    return os.path.join(base, *parts)
 
 DEFAULT_CONFIG = {
-    'download_path': os.path.join(BASE_FOLDER, 'Downloads'),
+    'download_path': os.path.join(ROOT_DIR, 'Downloads'),
     'add_hotkey': 'ctrl+space',
     'download_hotkey': 'ctrl+shift+space'
 }
@@ -160,27 +173,32 @@ logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
 
 def load_config() -> Dict[str, str]:
-    """Return configuration dictionary merging defaults with ``config.json``.
+    """Return configuration dictionary merging defaults with ``config.ini``.
 
     If the file is missing or broken the default configuration is returned and
     the error is logged.
     """
-    if os.path.exists(CONFIG_FILE):
+    parser = configparser.ConfigParser()
+    if parser.read(CONFIG_FILE, encoding='utf-8'):
         try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                cfg = {**DEFAULT_CONFIG, **data}
-                return cfg
+            data = dict(parser.items('hotkeys'))
+            cfg = {**DEFAULT_CONFIG, **data}
+            return cfg
         except Exception as e:
-            logging.error('Failed to load config: %s', e)
+            logging.error('Failed to parse config: %s', e)
     return DEFAULT_CONFIG.copy()
 
 
 def save_config(cfg: Dict[str, str]) -> None:
-    """Write configuration dictionary to ``config.json``."""
+    """Write configuration dictionary to ``config.ini``."""
+    parser = configparser.ConfigParser()
+    parser['hotkeys'] = {
+        'add_hotkey': cfg.get('add_hotkey', DEFAULT_CONFIG['add_hotkey']),
+        'download_hotkey': cfg.get('download_hotkey', DEFAULT_CONFIG['download_hotkey'])
+    }
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
+            parser.write(f)
     except Exception as e:
         logging.error('Failed to save config: %s', e)
 
@@ -214,7 +232,7 @@ def download_url(url: str, folder: str, progress_callback: Callable | None = Non
 def run_headless() -> None:
     """Run downloader in console-only mode.
 
-    Hotkeys configured in ``config.json`` remain functional. Progress for each
+    Hotkeys configured in ``config.ini`` remain functional. Progress for each
     download is printed to stdout. Use ``Ctrl+C`` to exit.
     """
 
@@ -286,7 +304,7 @@ class TrayController:
         if pystray and Image:
             self.icon = pystray.Icon(
                 'YTDownloader',
-                Image.open(resource_path('ico.ico')),
+                Image.open(resource_path('ico', 'ico.ico')),
                 'YT Downloader',
                 pystray.Menu(
                     pystray.MenuItem('Показать окно', self.show_app),
@@ -493,7 +511,7 @@ class App(tk.Tk):
             pyperclip.copy('')
             keyboard.press_and_release('ctrl+c')
             threading.Timer(0.2, self._read_clipboard).start()
-            self.tray.flash('act.ico')
+            self.tray.flash('ico/act.ico')
         except Exception as e:
             logging.error('Clipboard error: %s', e)
 
@@ -538,7 +556,7 @@ class App(tk.Tk):
     def _download_worker(self) -> None:
         """Worker thread that iterates over the queue and downloads each URL."""
         folder = self.path_var.get()
-        self.tray.set_icon('dw.ico')
+        self.tray.set_icon('ico/dw.ico')
         for idx, url in enumerate(list(self.links)):
             self._update_progress(0)
             try:
@@ -548,7 +566,7 @@ class App(tk.Tk):
             self.listbox.delete(0)
             self.links.pop(0)
         self._update_progress(0)
-        self.tray.set_icon('ico.ico')
+        self.tray.set_icon('ico/ico.ico')
         messagebox.showinfo('Done', 'All downloads finished')
 
     def _progress_hook(self, d):

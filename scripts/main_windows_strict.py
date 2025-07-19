@@ -2,10 +2,11 @@ import os
 import sys
 import atexit
 import time
-import json
+import configparser
 import logging
 from urllib.parse import urlparse
 from typing import Optional
+import re
 
 import yt_dlp
 import requests
@@ -14,37 +15,130 @@ import keyboard
 import pystray
 import pyperclip
 import threading
-
+try:
+    import win32con
+    import win32api
+    import win32gui
+except Exception:
+    win32con = win32api = win32gui = None  # type: ignore
 from PIL import Image
 import subprocess
 
 
-def get_base_folder() -> str:
-    """Returns the folder where persistent files should be stored."""
+class HotkeyManager:
+    """Cross-platform hotkey registration using pywin32 when possible."""
+
+    def __init__(self) -> None:
+        self.ids: dict[int, callable] = {}
+        self._counter = 1
+        self._loop_thread: threading.Thread | None = None
+
+    def _parse_win(self, combo: str) -> tuple[int, int] | None:
+        if not win32con:
+            return None
+        mods = 0
+        key = None
+        for part in combo.lower().split('+'):
+            if part == 'ctrl':
+                mods |= win32con.MOD_CONTROL
+            elif part == 'alt':
+                mods |= win32con.MOD_ALT
+            elif part == 'shift':
+                mods |= win32con.MOD_SHIFT
+            elif part == 'win':
+                mods |= win32con.MOD_WIN
+            else:
+                key = part
+        if key is None:
+            return None
+        vk = getattr(win32con, f'VK_{key.upper()}', None)
+        if vk is None:
+            if len(key) == 1:
+                vk = ord(key.upper())
+            else:
+                return None
+        return mods, vk
+
+    def _run_loop(self) -> None:
+        if not win32gui:
+            return
+        while True:
+            msg = win32gui.GetMessage(None, 0, 0)
+            if not msg:
+                break
+            if msg[1][1] == win32con.WM_HOTKEY:
+                cb = self.ids.get(msg[1][2])
+                if cb:
+                    cb()
+            win32gui.TranslateMessage(msg[1])
+            win32gui.DispatchMessage(msg[1])
+
+    def register(self, combo: str, callback) -> None:
+        if os.name == 'nt' and win32api:
+            parsed = self._parse_win(combo)
+            if parsed:
+                mods, vk = parsed
+                hot_id = self._counter
+                self._counter += 1
+                try:
+                    if win32api.RegisterHotKey(None, hot_id, mods, vk):
+                        self.ids[hot_id] = callback
+                        if not self._loop_thread:
+                            self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+                            self._loop_thread.start()
+                        return
+                except Exception as e:
+                    logging.error('Win32 hotkey failed: %s', e)
+        keyboard.add_hotkey(combo, callback, suppress=True, trigger_on_release=True)
+
+    def unregister_all(self) -> None:
+        if os.name == 'nt' and win32api:
+            for hot_id in list(self.ids):
+                try:
+                    win32api.UnregisterHotKey(None, hot_id)
+                except Exception:
+                    pass
+            self.ids.clear()
+        keyboard.unhook_all_hotkeys()
+
+
+hotkey_manager = HotkeyManager()
+
+def get_root_dir() -> str:
+    """Return the project root directory."""
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
+    folder = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(folder) if os.path.basename(folder) == 'scripts' else folder
 
 
-def resource_path(name: str) -> str:
+def resource_path(*parts: str) -> str:
     """Resolve resource path for bundled executables."""
     if getattr(sys, 'frozen', False):
-        return os.path.join(sys._MEIPASS, name)  # type: ignore[attr-defined]
-    return os.path.join(get_base_folder(), name)
+        base = sys._MEIPASS  # type: ignore[attr-defined]
+    else:
+        base = ROOT_DIR
+    return os.path.join(base, *parts)
 
 
 # === Пути и файлы ===
-BASE_FOLDER = get_base_folder()
-DOWNLOAD_LIST = os.path.join(BASE_FOLDER, 'download-list.txt')
-CONFIG_FILE = os.path.join(BASE_FOLDER, 'config.json')
-LOG_FILE = os.path.join(BASE_FOLDER, 'script.log')
-INFO_FILE = resource_path('info.txt')
+ROOT_DIR = get_root_dir()
+SYSTEM_DIR = os.path.join(ROOT_DIR, 'system')
+ICO_DIR = os.path.join(ROOT_DIR, 'ico')
+DOWNLOAD_LIST = os.path.join(SYSTEM_DIR, 'download-list.txt')
+CONFIG_FILE = os.path.join(SYSTEM_DIR, 'config.ini')
+LOG_FILE = os.path.join(SYSTEM_DIR, 'script.log')
+INFO_FILE = os.path.join(SYSTEM_DIR, 'info.txt')
+
+# Ensure the system directory exists before configuring logging
+os.makedirs(SYSTEM_DIR, exist_ok=True)
 
 # Эти переменные инициализируются после загрузки конфигурации
-DOWNLOADS_FOLDER = os.path.join(BASE_FOLDER, 'Downloads')
+DOWNLOADS_FOLDER = os.path.join(ROOT_DIR, 'Downloads')
 VIDEOS_FOLDER = os.path.join(DOWNLOADS_FOLDER, 'Videos')
 PLAYLIST_FOLDER = os.path.join(VIDEOS_FOLDER, 'Playlist Videos')
 PICTURES_FOLDER = os.path.join(DOWNLOADS_FOLDER, 'Pictures')
+WB_FOLDER = os.path.join(PICTURES_FOLDER, 'Wildberries')
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -64,9 +158,9 @@ def load_icon(name: str) -> Optional[Image.Image]:
     except Exception:
         return None
 
-ICON_DEFAULT = load_icon('ico.ico')
-ICON_ACTIVE = load_icon('act.ico')
-ICON_DOWNLOADING = load_icon('dw.ico')
+ICON_DEFAULT = load_icon(os.path.join('ico', 'ico.ico'))
+ICON_ACTIVE = load_icon(os.path.join('ico', 'act.ico'))
+ICON_DOWNLOADING = load_icon(os.path.join('ico', 'dw.ico'))
 
 def flash_tray_icon(icon: pystray.Icon, image: Image.Image, duration: float = 0.3) -> None:
     """Temporarily change the tray icon."""
@@ -95,25 +189,32 @@ DEFAULT_CONFIG = {
 
 def ensure_directories() -> None:
     """Создаёт директории для загрузок."""
+    os.makedirs(SYSTEM_DIR, exist_ok=True)
     os.makedirs(VIDEOS_FOLDER, exist_ok=True)
     os.makedirs(PLAYLIST_FOLDER, exist_ok=True)
     os.makedirs(PICTURES_FOLDER, exist_ok=True)
+    os.makedirs(WB_FOLDER, exist_ok=True)
 
 def load_config() -> dict:
-    if os.path.exists(CONFIG_FILE):
+    parser = configparser.ConfigParser()
+    if parser.read(CONFIG_FILE, encoding='utf-8'):
         try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return {**DEFAULT_CONFIG, **data}
+            data = dict(parser.items('hotkeys'))
+            return {**DEFAULT_CONFIG, **data}
         except Exception as e:
             logging.error('Ошибка загрузки конфигурации: %s', e)
     return DEFAULT_CONFIG.copy()
 
 
 def save_config(cfg: dict) -> None:
+    parser = configparser.ConfigParser()
+    parser['hotkeys'] = {
+        'add_hotkey': cfg.get('add_hotkey', DEFAULT_CONFIG['add_hotkey']),
+        'download_hotkey': cfg.get('download_hotkey', DEFAULT_CONFIG['download_hotkey'])
+    }
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
+            parser.write(f)
     except Exception as e:
         logging.error('Ошибка сохранения конфигурации: %s', e)
 
@@ -122,7 +223,7 @@ def ensure_single_instance() -> None:
     """Предотвращает запуск нескольких экземпляров скрипта."""
     if sys.platform.startswith('win'):
         import msvcrt
-        lock_path = os.path.join(BASE_FOLDER, 'script.lock')
+        lock_path = os.path.join(SYSTEM_DIR, 'script.lock')
         lock_file = open(lock_path, 'w')
         try:
             msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
@@ -196,6 +297,69 @@ def download_pinterest_image(url, folder):
         print(f"Ошибка при скачивании изображения с Pinterest: {e}")
 
 
+def download_wb_images(url: str, folder: str) -> None:
+    """Скачивает все изображения товара Wildberries."""
+    try:
+        m = re.search(r"/catalog/(\d+)/", url)
+        if not m:
+            print("Не удалось извлечь ID товара из ссылки WB.")
+            return
+        product_id = m.group(1)
+
+        vol = int(product_id) // 100000
+        part = int(product_id) // 1000
+
+        headers = {"User-Agent": "Mozilla/5.0"}
+
+        card_data = None
+        host_used = None
+        for host in range(100):
+            card_url = (
+                f"https://basket-{host:02d}.wbbasket.ru/vol{vol}/part{part}/"
+                f"{product_id}/info/ru/card.json"
+            )
+            try:
+                resp = requests.get(card_url, headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    card_data = resp.json()
+                    host_used = host
+                    break
+            except Exception:
+                continue
+
+        if not card_data:
+            print("Не удалось получить данные о товаре WB.")
+            return
+
+        name = card_data.get("imt_name", f"wb_{product_id}")
+        safe_name = "".join(c for c in name if c not in "\\/:*?\"<>|")
+        product_folder = os.path.join(folder, safe_name)
+        os.makedirs(product_folder, exist_ok=True)
+
+        count = card_data.get("media", {}).get("photo_count") or 0
+        if not count:
+            print("Не удалось определить количество изображений WB.")
+            return
+
+        host_part = f"https://basket-{host_used:02d}.wbbasket.ru"
+
+        for i in range(1, count + 1):
+            img_url = (
+                f"{host_part}/vol{vol}/part{part}/{product_id}/images/big/{i}.webp"
+            )
+            try:
+                img_data = requests.get(img_url, headers=headers, timeout=10).content
+                out_path = os.path.join(product_folder, f"{i}.webp")
+                with open(out_path, "wb") as f:
+                    f.write(img_data)
+                print(f"Скачано: {out_path}")
+            except Exception as e:
+                logging.error("Не удалось скачать %s: %s", img_url, e)
+    except Exception as e:
+        logging.error("Ошибка при скачивании изображений WB: %s", e)
+        print(f"Ошибка при скачивании изображений WB: {e}")
+
+
 def handle_url(url: str) -> None:
     """Определяет тип ссылки и запускает скачивание."""
     hostname = urlparse(url).hostname or ""
@@ -215,6 +379,11 @@ def handle_url(url: str) -> None:
         logging.info('Скачиваем изображение Pinterest: %s', url)
         print("Это Pinterest ссылка. Пытаемся скачать...")
         download_pinterest_image(url, PICTURES_FOLDER)
+
+    elif "wildberries.ru" in hostname:
+        logging.info('Скачиваем товар Wildberries: %s', url)
+        print("Это ссылка Wildberries. Пытаемся скачать изображения...")
+        download_wb_images(url, WB_FOLDER)
 
     else:
         logging.warning('Неизвестная ссылка: %s', url)
@@ -318,7 +487,7 @@ def main() -> None:
     # Меняем горячую клавишу
     def change_hotkey(icon, item):
         icon.notify('Настройка', 'Нажмите новое сочетание и Enter')
-        keyboard.unhook_all_hotkeys()
+        hotkey_manager.unregister_all()
         try:
             new_key = keyboard.read_hotkey()
             if new_key:
@@ -329,8 +498,8 @@ def main() -> None:
             logging.error('Ошибка смены горячей клавиши: %s', e)
         finally:
             # Восстанавливаем привязки
-            keyboard.add_hotkey(config['add_hotkey'], lambda: on_add(icon))
-            keyboard.add_hotkey(config['download_hotkey'], lambda: download_all(icon))
+            hotkey_manager.register(config['add_hotkey'], lambda: on_add(icon))
+            hotkey_manager.register(config['download_hotkey'], lambda: download_all(icon))
 
     # Меню «Скачать»
     def on_download(icon, item):
@@ -387,12 +556,12 @@ def main() -> None:
     tray_icon = pystray.Icon('YTDownloader', ICON_DEFAULT, 'YT Downloader', menu)
 
     # Привязка горячих клавиш
-    keyboard.add_hotkey(add_hotkey, lambda: on_add(tray_icon))
-    keyboard.add_hotkey(download_hotkey, lambda: download_all(tray_icon))
+    hotkey_manager.register(add_hotkey, lambda: on_add(tray_icon))
+    hotkey_manager.register(download_hotkey, lambda: download_all(tray_icon))
 
     print(f"Значок размещён в трее. Горячие клавиши {add_hotkey} и {download_hotkey} активны.")
     tray_icon.run()
-    keyboard.unhook_all_hotkeys()
+    hotkey_manager.unregister_all()
     print('Скрипт завершён.')
 
 if __name__ == '__main__':
