@@ -42,6 +42,8 @@ else:
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import tkinter.font as tkfont
+from cairosvg import svg2png
 
 
 def get_root_dir() -> str:
@@ -63,11 +65,26 @@ os.makedirs(SYSTEM_DIR, exist_ok=True)
 ICON_DEFAULT = os.path.join(ICO_DIR, 'ico.ico')
 ICON_ACTIVE = os.path.join(ICO_DIR, 'act.ico')
 ICON_DOWNLOAD = os.path.join(ICO_DIR, 'dw.ico')
+ICONS_DIR = os.path.join(ICO_DIR, 'program_icons')
+FONTS_DIR = os.path.join(ROOT_DIR, 'assets', 'fonts', 'static')
+FONT_FAMILY = 'Roboto'
 
 BG_COLOR = '#2b2b2b'
 FG_COLOR = '#f0f0f0'
 TEXT_COLOR = '#dddddd'
 PROGRESS_EMPTY = '#555555'
+
+
+def _shade(color: str, factor: float) -> str:
+    """Return color darkened by ``factor`` (0-1)."""
+    color = color.lstrip('#')
+    r = int(color[0:2], 16)
+    g = int(color[2:4], 16)
+    b = int(color[4:6], 16)
+    r = max(0, min(255, int(r * factor)))
+    g = max(0, min(255, int(g * factor)))
+    b = max(0, min(255, int(b * factor)))
+    return f'#{r:02x}{g:02x}{b:02x}'
 
 
 class HotkeyManager:
@@ -158,6 +175,18 @@ def resource_path(*parts: str) -> str:
     else:
         base = ROOT_DIR
     return os.path.join(base, *parts)
+
+
+def load_svg_icon(name: str, size: int = 20) -> tk.PhotoImage:
+    """Convert an SVG icon to ``PhotoImage``."""
+    path = resource_path(ICONS_DIR, name)
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+        png = svg2png(bytestring=data, output_width=size, output_height=size)
+        return tk.PhotoImage(data=png)
+    except Exception:
+        return tk.PhotoImage()
 
 DEFAULT_CONFIG = {
     'download_path': os.path.join(ROOT_DIR, 'Downloads'),
@@ -378,6 +407,14 @@ class App(tk.Tk):
         self.resizable(False, False)
         self.configure(bg=BG_COLOR)
 
+        default_font = tkfont.nametofont('TkDefaultFont')
+        default_font.configure(family=FONT_FAMILY)
+        self.option_add('*Font', default_font)
+
+        self.folder_icon = load_svg_icon('folder-solid.svg')
+        self.add_icon = load_svg_icon('plus-solid.svg')
+        self.trash_icon = load_svg_icon('trash-can-solid.svg')
+
         style = ttk.Style(self)
         style.theme_use('clam')
         style.configure('TFrame', background=BG_COLOR)
@@ -413,49 +450,65 @@ class App(tk.Tk):
         """Build all widgets for the interface."""
         frm = ttk.Frame(self, padding=10)
         frm.grid(row=0, column=0, sticky='nsew')
+        entry_opts = {
+            'bd': 1,
+            'relief': 'flat',
+            'highlightthickness': 1,
+            'highlightbackground': 'white',
+            'highlightcolor': 'white',
+            'bg': '#1a1a1a',
+            'fg': 'white',
+            'insertbackground': 'white',
+        }
+
+        def make_button(master, text, icon, color, cmd):
+            btn = tk.Button(master, text=' ' + text, image=icon, compound='left',
+                            command=cmd, bg=color, fg='white', activeforeground='white',
+                            activebackground=_shade(color, 0.9), bd=0, relief='flat',
+                            padx=10, pady=5)
+            btn.bind('<Enter>', lambda e, b=btn, c=color: b.configure(bg=_shade(c, 0.9)))
+            btn.bind('<Leave>', lambda e, b=btn, c=color: b.configure(bg=c))
+            return btn
 
         # Path selection
         path_label = ttk.Label(frm, text='Путь:')
         path_label.grid(row=0, column=0, sticky='w')
 
         self.path_var = tk.StringVar(value=self.cfg['download_path'])
-        path_entry = ttk.Entry(frm, textvariable=self.path_var, width=40)
+        path_entry = tk.Entry(frm, textvariable=self.path_var, width=40, **entry_opts)
         path_entry.grid(row=0, column=1, sticky='we')
 
-        path_btn = ttk.Button(frm, text='Выбрать', command=self.choose_path)
+        path_btn = make_button(frm, 'Выбрать', self.folder_icon, '#1E88E5', self.choose_path)
         path_btn.grid(row=0, column=2, padx=5)
 
         # Hotkeys
         ttk.Label(frm, text='Горячая клавиша добавления:').grid(row=1, column=0, sticky='w')
         self.add_hotkey_var = tk.StringVar(value=self.cfg['add_hotkey'])
-        ttk.Entry(frm, textvariable=self.add_hotkey_var, width=20).grid(row=1, column=1, sticky='w')
+        tk.Entry(frm, textvariable=self.add_hotkey_var, width=20, **entry_opts).grid(row=1, column=1, sticky='w')
 
         ttk.Label(frm, text='Горячая клавиша скачивания:').grid(row=2, column=0, sticky='w')
         self.download_hotkey_var = tk.StringVar(value=self.cfg['download_hotkey'])
-        ttk.Entry(frm, textvariable=self.download_hotkey_var, width=20).grid(row=2, column=1, sticky='w')
+        tk.Entry(frm, textvariable=self.download_hotkey_var, width=20, **entry_opts).grid(row=2, column=1, sticky='w')
 
-        reserve_btn = ttk.Button(frm, text='Применить', command=self.apply_settings)
+        reserve_btn = make_button(frm, 'Применить', self.add_icon, '#388E3C', self.apply_settings)
         reserve_btn.grid(row=1, column=2, rowspan=2, padx=5)
 
         # Manual link entry
         ttk.Label(frm, text='Ссылка:').grid(row=3, column=0, sticky='w')
         self.link_var = tk.StringVar()
-        ttk.Entry(frm, textvariable=self.link_var, width=40).grid(row=3, column=1, sticky='we')
-        ttk.Button(frm, text='Добавить', command=self.add_from_entry).grid(row=3, column=2, padx=5)
+        tk.Entry(frm, textvariable=self.link_var, width=40, **entry_opts).grid(row=3, column=1, sticky='we')
+        make_button(frm, 'Добавить', self.add_icon, '#388E3C', self.add_from_entry).grid(row=3, column=2, padx=5)
 
         # Queue list
         self.listbox = tk.Listbox(frm, width=60, height=10, bg=BG_COLOR, fg=TEXT_COLOR, highlightbackground=FG_COLOR, selectbackground=FG_COLOR, selectforeground=BG_COLOR)
         self.listbox.grid(row=4, column=0, columnspan=3, pady=5)
-        add_btn = ttk.Button(frm, text='Добавить из буфера', command=self.add_from_clipboard)
+        add_btn = make_button(frm, 'Добавить из буфера', self.add_icon, '#388E3C', self.add_from_clipboard)
         add_btn.grid(row=5, column=0, sticky='we', pady=2)
-
-        remove_btn = ttk.Button(frm, text='Удалить выбранное', command=self.remove_selected)
+        remove_btn = make_button(frm, 'Удалить выбранное', self.trash_icon, '#D32F2F', self.remove_selected)
         remove_btn.grid(row=5, column=1, sticky='we', pady=2)
-
-        clear_btn = ttk.Button(frm, text='Очистить список', command=self.clear_list)
+        clear_btn = make_button(frm, 'Очистить список', self.trash_icon, '#616161', self.clear_list)
         clear_btn.grid(row=5, column=2, sticky='we', pady=2)
-
-        start_btn = ttk.Button(frm, text='Скачать', command=self.start_downloads)
+        start_btn = make_button(frm, 'Скачать', self.folder_icon, '#1E88E5', self.start_downloads)
         start_btn.grid(row=6, column=0, columnspan=3, sticky='we', pady=(10,2))
 
         self.progress_canvas = tk.Canvas(frm, width=120, height=30, bg=BG_COLOR, highlightthickness=0)
